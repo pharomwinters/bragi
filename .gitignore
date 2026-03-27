@@ -1,0 +1,13 @@
+# Binaries
+bragi
+*.exe
+
+# Model files
+nomic-embed-text-v1.5/
+
+# Design docs (working documents, not source)
+bragi-design-doc-*.md
+
+# OS
+.DS_Store
+Thumbs.db
