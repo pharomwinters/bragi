@@ -1,5 +1,5 @@
 # Binaries
-bragi
+/bragi
 *.exe
 
 # Model files
