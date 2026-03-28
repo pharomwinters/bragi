@@ -42,6 +42,11 @@ func NewDialog(t theme.Theme, width int) Dialog {
 	}
 }
 
+// SetTheme updates the dialog's theme.
+func (d *Dialog) SetTheme(t theme.Theme) {
+	d.theme = t
+}
+
 // ShowInput shows a text input dialog.
 func (d *Dialog) ShowInput(kind dialogKind, title, placeholder string) {
 	d.kind = kind

@@ -82,6 +82,25 @@ func New(t theme.Theme, width, height int) Model {
 	}
 }
 
+// SetTheme updates the file tree's theme colors.
+func (m *Model) SetTheme(t theme.Theme) {
+	m.theme = t
+
+	delegate := list.NewDefaultDelegate()
+	delegate.ShowDescription = false
+	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
+		Foreground(lipgloss.Color(string(t.Pink))).
+		BorderLeftForeground(lipgloss.Color(string(t.Pink)))
+	delegate.Styles.NormalTitle = delegate.Styles.NormalTitle.
+		Foreground(lipgloss.Color(string(t.Foreground)))
+	m.list.SetDelegate(delegate)
+
+	m.list.Styles.Title = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(string(t.Purple))).
+		Padding(0, 1)
+}
+
 // SetFiles updates the file tree with a new list of relative paths.
 func (m *Model) SetFiles(files []string) {
 	// Build a tree-like flat list from relative paths.

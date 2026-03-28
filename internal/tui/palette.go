@@ -36,6 +36,11 @@ func NewPalette(t theme.Theme, cmds *CommandRegistry, width int) Palette {
 	}
 }
 
+// SetTheme updates the palette's theme.
+func (p *Palette) SetTheme(t theme.Theme) {
+	p.theme = t
+}
+
 // Show opens the palette.
 func (p *Palette) Show() {
 	p.visible = true

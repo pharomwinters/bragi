@@ -31,6 +31,11 @@ func (s *StatusBar) SetWidth(w int) {
 	s.width = w
 }
 
+// SetTheme updates the status bar's theme.
+func (s *StatusBar) SetTheme(t theme.Theme) {
+	s.theme = t
+}
+
 // SetFile updates the displayed filename and modified state.
 func (s *StatusBar) SetFile(name string, modified bool) {
 	s.fileName = name

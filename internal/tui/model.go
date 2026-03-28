@@ -269,6 +269,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.theme = theme.Dracula
 		}
+		// Propagate theme to all child components.
+		m.editor.SetTheme(m.theme)
+		m.fileTree.SetTheme(m.theme)
+		m.statusBar.SetTheme(m.theme)
+		m.palette.SetTheme(m.theme)
+		m.dialog.SetTheme(m.theme)
+		m.findBar.SetTheme(m.theme)
 		m.statusBar.SetMessage("Theme: " + m.theme.Name)
 		cmds = append(cmds, editor.ClearStatusAfter(2*time.Second))
 

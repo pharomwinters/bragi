@@ -35,6 +35,11 @@ func NewFindBar(t theme.Theme, width int) FindBar {
 	}
 }
 
+// SetTheme updates the find bar's theme.
+func (f *FindBar) SetTheme(t theme.Theme) {
+	f.theme = t
+}
+
 // Show opens the find bar.
 func (f *FindBar) Show() {
 	f.visible = true

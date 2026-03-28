@@ -81,6 +81,22 @@ func (m *Model) LoadFile(relPath, content string) {
 	m.wordCount = markdown.WordCount(content)
 }
 
+// SetTheme updates the editor's theme colors.
+func (m *Model) SetTheme(t theme.Theme) {
+	m.theme = t
+	m.textarea.FocusedStyle.Base = m.textarea.FocusedStyle.Base.
+		Background(lipgloss.Color(string(t.Background)))
+	m.textarea.FocusedStyle.Text = m.textarea.FocusedStyle.Text.
+		Foreground(lipgloss.Color(string(t.Foreground)))
+	m.textarea.FocusedStyle.Placeholder = m.textarea.FocusedStyle.Placeholder.
+		Foreground(lipgloss.Color(string(t.Comment)))
+	m.textarea.FocusedStyle.CursorLine = m.textarea.FocusedStyle.CursorLine.
+		Background(lipgloss.Color(string(t.CurrentLine)))
+	m.textarea.FocusedStyle.LineNumber = m.textarea.FocusedStyle.LineNumber.
+		Foreground(lipgloss.Color(string(t.Comment)))
+	m.textarea.BlurredStyle = m.textarea.FocusedStyle
+}
+
 // SetSize updates the editor dimensions.
 func (m *Model) SetSize(width, height int) {
 	m.width = width
