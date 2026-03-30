@@ -7,10 +7,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/adambick/bragi/internal/database"
 	"github.com/adambick/bragi/internal/editor"
 	"github.com/adambick/bragi/internal/filetree"
 	"github.com/adambick/bragi/internal/knowledgebase"
 	"github.com/adambick/bragi/internal/markdown"
+	"github.com/adambick/bragi/internal/search"
 	"github.com/adambick/bragi/internal/theme"
 	"github.com/adambick/bragi/internal/wikilink"
 )
@@ -33,7 +35,12 @@ type Model struct {
 	project   *knowledgebase.Project
 	theme     theme.Theme
 	parser    *markdown.Parser
-	linkIndex *wikilink.Index
+	linkIndex *wikilink.PersistentIndex
+
+	// Phase 2: search infrastructure (nil if unavailable).
+	db        *database.DB
+	indexer   *search.Indexer
+	searchEng *search.Engine
 
 	// UI components
 	fileTree  filetree.Model
@@ -42,6 +49,7 @@ type Model struct {
 	palette   Palette
 	dialog    Dialog
 	findBar   FindBar
+	searchUI  Search
 	commands  *CommandRegistry
 
 	// Layout
@@ -57,14 +65,30 @@ type Model struct {
 }
 
 // NewModel creates the root TUI model.
-func NewModel(proj *knowledgebase.Project, t theme.Theme) Model {
+// The db, indexer, searchEng, and linkIdx parameters may be nil if search is unavailable.
+func NewModel(
+	proj *knowledgebase.Project,
+	t theme.Theme,
+	db *database.DB,
+	indexer *search.Indexer,
+	searchEng *search.Engine,
+	linkIdx *wikilink.PersistentIndex,
+) Model {
 	cmds := NewCommandRegistry()
+
+	var li *wikilink.PersistentIndex
+	if linkIdx != nil {
+		li = linkIdx
+	}
 
 	m := Model{
 		project:      proj,
 		theme:        t,
 		parser:       markdown.NewParser(),
-		linkIndex:    wikilink.NewIndex(),
+		linkIndex:    li,
+		db:           db,
+		indexer:      indexer,
+		searchEng:    searchEng,
 		commands:     cmds,
 		sidebarWidth: sidebarDefaultWidth,
 		sidebarOpen:  true,
@@ -78,13 +102,21 @@ func NewModel(proj *knowledgebase.Project, t theme.Theme) Model {
 	m.palette = NewPalette(t, cmds, 80)
 	m.dialog = NewDialog(t, 80)
 	m.findBar = NewFindBar(t, 80)
+	m.searchUI = NewSearch(t, searchEng, 80, 20)
 
 	return m
 }
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.loadFiles(), m.editor.Init())
+	cmds := []tea.Cmd{m.loadFiles(), m.editor.Init()}
+
+	// Start polling the indexer status channel.
+	if m.indexer != nil {
+		cmds = append(cmds, m.pollIndexStatus())
+	}
+
+	return tea.Batch(cmds...)
 }
 
 // Update implements tea.Model.
@@ -95,6 +127,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.palette.Visible() {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
+			// Handle ESC directly to avoid value-copy issues with palette.Update.
+			if msg.Type == tea.KeyEscape {
+				m.palette.Hide()
+				m.statusBar.SetMessage("Palette closed (ESC)")
+				return m, nil
+			}
 			var cmd tea.Cmd
 			m.palette, cmd = m.palette.Update(msg)
 			cmds = append(cmds, cmd)
@@ -108,6 +146,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.dialog.Visible() {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
+			if msg.Type == tea.KeyEscape {
+				m.dialog.Hide()
+				return m, nil
+			}
 			var cmd tea.Cmd
 			m.dialog, cmd = m.dialog.Update(msg)
 			cmds = append(cmds, cmd)
@@ -117,9 +159,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.searchUI.Visible() {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			if msg.Type == tea.KeyEscape {
+				m.searchUI.Hide()
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.searchUI, cmd = m.searchUI.Update(msg)
+			cmds = append(cmds, cmd)
+			return m, tea.Batch(cmds...)
+		case searchDebounceMsg:
+			if msg.query == m.searchUI.lastQuery && msg.time == m.searchUI.queryTime {
+				return m, performSearch(m.searchEng, msg.query)
+			}
+			return m, nil
+		case searchResultsMsg:
+			if msg.err != nil {
+				m.searchUI.loading = false
+			} else {
+				m.searchUI.results = msg.results
+				m.searchUI.loading = false
+				m.searchUI.cursor = 0
+			}
+			return m, nil
+		case searchOpenResultMsg:
+			return m, m.openFile(msg.relPath)
+		}
+	}
+
 	if m.findBar.Visible() {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
+			if msg.Type == tea.KeyEscape {
+				m.findBar.Hide()
+				m.focus = focusEditor
+				m.editor.SetFocused(true)
+				return m, nil
+			}
 			var cmd tea.Cmd
 			m.findBar, cmd = m.findBar.Update(msg)
 			cmds = append(cmds, cmd)
@@ -174,6 +252,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+p":
 			m.palette.Show()
 			return m, nil
+		case "ctrl+k":
+			m.searchUI.Show()
+			return m, nil
 		case "ctrl+n":
 			m.dialog.ShowInput(dialogNewNote, "New Note", "Enter note title...")
 			return m, nil
@@ -184,7 +265,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sidebarOpen = !m.sidebarOpen
 			m.updateLayout()
 			return m, nil
-		case "escape":
+		case "escape", "esc":
 			if m.focus == focusEditor {
 				m.toggleFocus()
 				return m, nil
@@ -203,7 +284,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		doc := m.parser.Parse(msg.Content)
 		links := wikilink.Extract(doc.Body)
-		m.linkIndex.Update(msg.RelPath, links)
+		if m.linkIndex != nil {
+			m.linkIndex.Update(msg.RelPath, links)
+		}
 
 		m.statusBar.SetFile(msg.RelPath, false)
 		m.statusBar.SetWordCount(markdown.WordCount(doc.Body))
@@ -219,7 +302,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		doc := m.parser.Parse(m.editor.Content())
 		links := wikilink.Extract(doc.Body)
-		m.linkIndex.Update(msg.RelPath, links)
+		if m.linkIndex != nil {
+			m.linkIndex.Update(msg.RelPath, links)
+		}
+
+		// Enqueue for background reindexing.
+		if m.indexer != nil && m.project.Config.Search.IndexOnSave {
+			m.indexer.Enqueue(search.IndexRequest{
+				RelPath: msg.RelPath,
+				Content: m.editor.Content(),
+			})
+		}
 
 	case editor.ClearStatusMsg:
 		m.statusBar.ClearMessage()
@@ -232,8 +325,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case filesLoadedMsg:
 		m.fileTree.SetFiles(msg.files)
-		// Index wikilinks for all files on load.
-		cmds = append(cmds, m.indexAllFiles(msg.files))
+		// If we have a persistent index, it already loaded from DB.
+		// Otherwise, scan all files for wikilinks (Phase 1 fallback).
+		if m.linkIndex == nil {
+			// No persistent index; skip wikilink indexing.
+		} else if m.db == nil {
+			// No DB, so scan files for wikilinks.
+			cmds = append(cmds, m.indexAllFiles(msg.files))
+		}
+		// If we have a DB, the wikilinks were already loaded by PersistentIndex.
 
 	// Internal command messages.
 	case paletteExecuteMsg:
@@ -263,6 +363,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sidebarOpen = !m.sidebarOpen
 		m.updateLayout()
 
+	case openSearchMsg:
+		m.searchUI.Show()
+		return m, nil
+
+	case reindexAllMsg:
+		if m.indexer != nil {
+			m.indexer.ReindexAll()
+			m.statusBar.SetMessage("Reindexing all files...")
+			cmds = append(cmds, editor.ClearStatusAfter(2*time.Second))
+		} else {
+			m.statusBar.SetMessage("Search not available")
+			cmds = append(cmds, editor.ClearStatusAfter(2*time.Second))
+		}
+
+	case IndexProgressMsg:
+		if msg.QueueSize > 0 {
+			m.statusBar.SetMessage(fmt.Sprintf("Indexing... (%d remaining)", msg.QueueSize))
+		} else if msg.QueueSize == 0 && msg.Done {
+			m.statusBar.SetMessage("Indexing complete")
+			cmds = append(cmds, editor.ClearStatusAfter(2*time.Second))
+		}
+		// QueueSize == -1 means timeout (no status), just keep polling.
+		if m.indexer != nil {
+			cmds = append(cmds, m.pollIndexStatus())
+		}
+
 	case switchThemeMsg:
 		if m.theme.Name == "dracula" {
 			m.theme = theme.Alucard
@@ -276,6 +402,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.palette.SetTheme(m.theme)
 		m.dialog.SetTheme(m.theme)
 		m.findBar.SetTheme(m.theme)
+		m.searchUI.SetTheme(m.theme)
 		m.statusBar.SetMessage("Theme: " + m.theme.Name)
 		cmds = append(cmds, editor.ClearStatusAfter(2*time.Second))
 
@@ -290,14 +417,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editor.SetFocused(true)
 
 	case noteRenamedMsg:
-		m.linkIndex.Remove(msg.oldRel)
+		if m.linkIndex != nil {
+			m.linkIndex.Remove(msg.oldRel)
+		}
 		m.statusBar.SetMessage("Renamed to: " + msg.newRel)
 		cmds = append(cmds, editor.ClearStatusAfter(2*time.Second))
 		cmds = append(cmds, m.loadFiles())
 		cmds = append(cmds, m.openFile(msg.newRel))
 
 	case noteDeletedMsg:
-		m.linkIndex.Remove(msg.relPath)
+		if m.linkIndex != nil {
+			m.linkIndex.Remove(msg.relPath)
+		}
 		m.editor.LoadFile("", "")
 		m.statusBar.SetFile("", false)
 		m.statusBar.SetMessage("Deleted: " + msg.relPath)
@@ -375,6 +506,11 @@ func (m Model) View() string {
 
 	if m.dialog.Visible() {
 		overlay := m.dialog.View()
+		view = m.overlayCenter(view, overlay)
+	}
+
+	if m.searchUI.Visible() {
+		overlay := m.searchUI.View()
 		view = m.overlayCenter(view, overlay)
 	}
 
@@ -568,9 +704,12 @@ func (m Model) deleteNote(relPath string) tea.Cmd {
 
 type noteDeletedMsg struct{ relPath string }
 
-// indexAllFiles scans all project files for wikilinks on startup.
+// indexAllFiles scans all project files for wikilinks on startup (Phase 1 fallback).
 func (m Model) indexAllFiles(files []string) tea.Cmd {
 	return func() tea.Msg {
+		if m.linkIndex == nil {
+			return nil
+		}
 		for _, f := range files {
 			content, err := m.project.ReadNote(f)
 			if err != nil {
@@ -581,9 +720,30 @@ func (m Model) indexAllFiles(files []string) tea.Cmd {
 			m.linkIndex.Update(f, links)
 		}
 
-		files, links, targets := m.linkIndex.Stats()
+		fileCount, linkCount, targetCount := m.linkIndex.Stats()
 		return StatusMsg{
-			Text: fmt.Sprintf("Indexed %d files, %d links, %d targets", files, links, targets),
+			Text: fmt.Sprintf("Indexed %d files, %d links, %d targets", fileCount, linkCount, targetCount),
+		}
+	}
+}
+
+// pollIndexStatus reads from the indexer's status channel and converts to a tea.Msg.
+func (m Model) pollIndexStatus() tea.Cmd {
+	return func() tea.Msg {
+		if m.indexer == nil {
+			return nil
+		}
+		select {
+		case status := <-m.indexer.Status():
+			return IndexProgressMsg{
+				RelPath:   status.RelPath,
+				QueueSize: status.QueueSize,
+				Done:      status.Done,
+				Err:       status.Err,
+			}
+		case <-time.After(500 * time.Millisecond):
+			// No status yet, poll again.
+			return IndexProgressMsg{QueueSize: -1}
 		}
 	}
 }

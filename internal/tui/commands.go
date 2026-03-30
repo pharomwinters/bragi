@@ -67,6 +67,20 @@ func NewCommandRegistry() *CommandRegistry {
 					return switchThemeMsg{}
 				},
 			},
+			{
+				Name:        "Semantic Search",
+				Description: "Search your knowledge base (Ctrl+K)",
+				Action: func(m *Model) interface{} {
+					return openSearchMsg{}
+				},
+			},
+			{
+				Name:        "Reindex All",
+				Description: "Rebuild the search index for all files",
+				Action: func(m *Model) interface{} {
+					return reindexAllMsg{}
+				},
+			},
 		},
 	}
 }
@@ -81,3 +95,5 @@ type showDialogMsg struct{ kind dialogKind }
 type saveFromPaletteMsg struct{}
 type toggleSidebarMsg struct{}
 type switchThemeMsg struct{}
+type openSearchMsg struct{}
+type reindexAllMsg struct{}

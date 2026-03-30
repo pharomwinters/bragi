@@ -35,8 +35,12 @@ type Model struct {
 	original string // content at load time, for modified detection
 	loaded   bool
 
-	// Word count
-	wordCount int
+	// Cached state — updated only when content actually changes to avoid
+	// O(n) comparisons on every scroll / cursor-move event.
+	wordCount   int
+	modified    bool
+	lastLen     int    // byte length of last known content
+	lastContent string // full content snapshot, refreshed on length change
 }
 
 // New creates a new editor model.
@@ -79,6 +83,9 @@ func (m *Model) LoadFile(relPath, content string) {
 	m.textarea.SetValue(content)
 	m.textarea.CursorStart()
 	m.wordCount = markdown.WordCount(content)
+	m.modified = false
+	m.lastLen = len(content)
+	m.lastContent = content
 }
 
 // SetTheme updates the editor's theme colors.
@@ -121,8 +128,9 @@ func (m Model) Focused() bool {
 }
 
 // Content returns the current editor content.
+// Uses the cached snapshot — O(1). Updated on every content-modifying event.
 func (m Model) Content() string {
-	return m.textarea.Value()
+	return m.lastContent
 }
 
 // RelPath returns the currently loaded file path.
@@ -131,11 +139,12 @@ func (m Model) RelPath() string {
 }
 
 // Modified returns whether the content has been modified since load.
+// Returns the cached state — O(1).
 func (m Model) Modified() bool {
 	if !m.loaded {
 		return false
 	}
-	return m.textarea.Value() != m.original
+	return m.modified
 }
 
 // WordCount returns the current word count.
@@ -150,12 +159,27 @@ func (m Model) Loaded() bool {
 
 // MarkSaved updates the original content after a successful save.
 func (m *Model) MarkSaved() {
-	m.original = m.textarea.Value()
+	m.original = m.lastContent
+	m.modified = false
 }
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
 	return textarea.Blink
+}
+
+// navigationKey returns true for keys that move the cursor or scroll but
+// cannot modify content. Value() is never called for these.
+func navigationKey(s string) bool {
+	switch s {
+	case "up", "down", "left", "right",
+		"pgup", "pgdown", "home", "end",
+		"ctrl+up", "ctrl+down", "ctrl+left", "ctrl+right",
+		"shift+up", "shift+down", "shift+left", "shift+right",
+		"alt+left", "alt+right":
+		return true
+	}
+	return false
 }
 
 // Update implements tea.Model.
@@ -166,26 +190,45 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	var cmds []tea.Cmd
 
+	// Determine whether this message can possibly change content before we
+	// hand it to the textarea. Pure navigation and mouse events cannot.
+	contentMayChange := true
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+s":
-			// Request save.
+			// Request save using the cached content snapshot.
 			return m, func() tea.Msg {
 				return SaveRequestMsg{
 					RelPath: m.relPath,
-					Content: m.textarea.Value(),
+					Content: m.lastContent,
 				}
 			}
+		default:
+			contentMayChange = !navigationKey(msg.String())
 		}
+	case tea.MouseMsg:
+		contentMayChange = false
+	default:
+		contentMayChange = false
 	}
 
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
 	cmds = append(cmds, cmd)
 
-	// Update word count after any text change.
-	m.wordCount = markdown.WordCount(m.textarea.Value())
+	// Only call Value() (O(n)) when the key event could have changed content.
+	// Scroll / cursor events are handled in O(1).
+	if contentMayChange {
+		newVal := m.textarea.Value() // single allocation
+		newLen := len(newVal)
+		m.lastContent = newVal
+		if newLen != m.lastLen {
+			m.lastLen = newLen
+			m.wordCount = markdown.WordCount(newVal)
+		}
+		m.modified = (newVal != m.original)
+	}
 
 	return m, tea.Batch(cmds...)
 }

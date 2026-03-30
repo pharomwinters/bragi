@@ -102,12 +102,12 @@ func (d Dialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "escape":
+		switch {
+		case msg.Type == tea.KeyEscape:
 			d.Hide()
 			return d, nil
 
-		case "enter":
+		case msg.Type == tea.KeyEnter:
 			kind := d.kind
 			value := d.input.Value()
 			d.Hide()
@@ -115,7 +115,7 @@ func (d Dialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
 				return dialogConfirmMsg{kind: kind, value: value}
 			}
 
-		case "y", "Y":
+		case msg.String() == "y" || msg.String() == "Y":
 			if d.message != "" { // confirmation dialog
 				kind := d.kind
 				d.Hide()
@@ -124,7 +124,7 @@ func (d Dialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
 				}
 			}
 
-		case "n", "N":
+		case msg.String() == "n" || msg.String() == "N":
 			if d.message != "" { // confirmation dialog
 				d.Hide()
 				return d, nil

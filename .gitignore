@@ -5,6 +5,11 @@
 # Model files
 nomic-embed-text-v1.5/
 
+# Database
+bragi.db
+bragi.db-wal
+bragi.db-shm
+
 # Design docs (working documents, not source)
 bragi-design-doc-*.md
 

@@ -26,3 +26,11 @@ type ErrorMsg struct {
 type StatusMsg struct {
 	Text string
 }
+
+// IndexProgressMsg reports indexer status to the TUI.
+type IndexProgressMsg struct {
+	RelPath   string
+	QueueSize int
+	Done      bool
+	Err       error
+}

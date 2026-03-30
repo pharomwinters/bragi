@@ -85,20 +85,20 @@ func (f FindBar) Update(msg tea.Msg) (FindBar, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "escape":
+		switch {
+		case msg.Type == tea.KeyEscape:
 			f.Hide()
 			return f, func() tea.Msg {
 				return findClosedMsg{}
 			}
 
-		case "enter":
+		case msg.Type == tea.KeyEnter:
 			// Find next match.
 			return f, func() tea.Msg {
 				return findNextMsg{query: f.query}
 			}
 
-		case "shift+enter":
+		case msg.String() == "shift+enter":
 			// Find previous match.
 			return f, func() tea.Msg {
 				return findPrevMsg{query: f.query}

@@ -74,12 +74,12 @@ func (p Palette) Update(msg tea.Msg) (Palette, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "escape":
+		switch {
+		case msg.Type == tea.KeyEscape:
 			p.Hide()
 			return p, nil
 
-		case "enter":
+		case msg.Type == tea.KeyEnter:
 			if p.cursor < len(p.filtered) {
 				cmd := p.filtered[p.cursor]
 				p.Hide()
@@ -91,13 +91,13 @@ func (p Palette) Update(msg tea.Msg) (Palette, tea.Cmd) {
 			p.Hide()
 			return p, nil
 
-		case "up":
+		case msg.Type == tea.KeyUp:
 			if p.cursor > 0 {
 				p.cursor--
 			}
 			return p, nil
 
-		case "down":
+		case msg.Type == tea.KeyDown:
 			if p.cursor < len(p.filtered)-1 {
 				p.cursor++
 			}
