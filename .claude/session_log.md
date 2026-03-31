@@ -5,6 +5,7 @@
 ### What was done
 
 **Project setup:**
+
 - Initialized Go module (`github.com/adambick/bragi`, Go 1.26.1)
 - Added GPLv3 license and NOTICE with Dracula Theme credit to Zeno Rocha and Lucas de França
 - Scaffolded project directory structure (`cmd/bragi/`, `internal/` with 11 packages)
@@ -28,6 +29,7 @@
 **Bug fix:** Theme switch via command palette now propagates to all child components (editor, file tree, status bar, palette, dialog, find bar). Previously only updated the root model's theme field — children kept their construction-time copies.
 
 ### Stats
+
 - 22 Go source files, 3 test files
 - 8 packages with code: config, theme, knowledgebase, markdown, wikilink, filetree, editor, tui
 - 3 packages still empty (Phase 2): database, embedding, search
@@ -35,6 +37,7 @@
 - ~3,600 lines of Go
 
 ### What's next (Phase 2)
+
 - SQLite database embedded in project directory (`bragi.db`)
 - sqlite-vec for vector search
 - Local embedding generation via ONNX Runtime
@@ -47,7 +50,11 @@
 
 ## 2026-03-30 — Phase 2 Semantic Search & SQLite Persistence
 
-### What was done
+**Summary:** Added semantic search, ONNX-based embedding generation, SQLite persistence, and integrated these features into the TUI and CLI.
+
+**Goal:** Add semantic search and persistent storage via SQLite and ONNX-based embeddings.
+
+**Phase 2 implementation (7 chunks, all complete):**
 
 **Phase 2 implementation (7 chunks, all complete):**
 
@@ -66,12 +73,14 @@
 7. **TUI Integration** — Search overlay (`Ctrl+K`) with debounced query, result display (title, heading, snippet, similarity score), cursor navigation, Enter to open file. Added to command palette as "Semantic Search" and "Reindex All". Index progress displayed in status bar. `app.go` initializes DB → model → embedder → persistent wikilinks → indexer → search engine with graceful degradation (all nil-guarded). `bragi index` CLI subcommand for headless reindexing. `.gitignore` updated for `bragi.db*`.
 
 ### Stats
+
 - 34 Go source files (was 22), 9 test files (was 3)
 - 11 packages with code (was 8): added database, embedding, search
 - 34 passing tests (was 27), race-detector clean
 - ~6,200 lines of Go (was ~3,600)
 
 ### New dependencies
+
 - `github.com/mattn/go-sqlite3` v1.14.38
 - `github.com/asg017/sqlite-vec-go-bindings` v0.1.6
 - `github.com/yalue/onnxruntime_go` v1.27.0
@@ -79,11 +88,13 @@
 - `gopkg.in/yaml.v3` v3.0.1
 
 ### Build requirements
+
 - `CGO_ENABLED=1` (required by mattn/go-sqlite3)
 - ONNX Runtime shared library on system for embedding generation
 - Model auto-downloads on first use (~100MB to `~/.cache/bragi/models/`)
 
 ### What's next (Phase 3 ideas)
+
 - Backlinks panel in the TUI sidebar
 - Daily notes with automatic templates
 - Vim keybinding mode for the editor
@@ -148,7 +159,7 @@
 
 **New feature — Global Project Registry:**
 
-4. **`bragi open <name>` from anywhere** — New `internal/registry` package:
+1. **`bragi open <name>` from anywhere** — New `internal/registry` package:
    - Registry file at `~/.config/bragi/registry.toml`
    - TOML format: `[projects]` table with `name = "absolute/path"` entries.
    - API: `Load()`, `LoadFrom(path)`, `Save()`, `Add()`, `AddOrUpdate()`,
@@ -165,18 +176,21 @@
    - 11 tests in `registry_test.go`, all passing.
 
 ### Stats
+
 - 38 Go source files (was 34), 10 test files (was 9)
 - 12 packages with code (was 11): added `registry`
 - 45 passing tests (was 34)
 - ~7,300 lines of Go (was ~6,200)
 
 ### Known issues
+
 - **ESC key does not close overlays in Kitty terminal** — bubbletea receives
   `KeyEscape` correctly (verified with `cmd/keydebug` tool), but the palette /
   dialog / search / find bar do not close. Needs deeper investigation into
   Bubble Tea's model value-semantics or event routing.
 
 ### What's next (Phase 3 ideas)
+
 - Fix ESC key issue
 - Backlinks panel in the TUI sidebar
 - Daily notes with automatic templates
